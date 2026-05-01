@@ -1,0 +1,40 @@
+name: DART 재무 모니터링
+
+on:
+  schedule:
+    # 매일 오전 8시 (KST) = UTC 23:00 (전날)
+    - cron: "0 23 * * *"
+  workflow_dispatch:   # 수동 실행 버튼
+
+jobs:
+  dart-monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120   # DART API는 느릴 수 있음
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설치 (3.11)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: DART 모니터링 실행
+        env:
+          DART_API_KEY:       ${{ secrets.DART_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python dart_monitor.py
+
+      - name: 결과 엑셀 아티팩트 저장 (90일 보관)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dart-report-${{ github.run_id }}
+          path: dart_report_*.xlsx
+          retention-days: 90
