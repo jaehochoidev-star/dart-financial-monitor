@@ -62,6 +62,14 @@ git push -u origin main
 | `DART_API_KEY`      | DART API 인증키              |
 | `TELEGRAM_BOT_TOKEN`| 텔레그램 봇 토큰              |
 | `TELEGRAM_CHAT_ID`  | 본인 텔레그램 채팅 ID         |
+| `SMTP_HOST`         | SMTP 서버 (예: `smtp.gmail.com`) |
+| `SMTP_PORT`         | SMTP 포트 (일반적으로 `587`)    |
+| `SMTP_USER`         | SMTP 로그인 계정                 |
+| `SMTP_PASSWORD`     | SMTP 비밀번호 또는 앱 비밀번호    |
+| `EMAIL_FROM`        | 발신 이메일 주소                 |
+| `EMAIL_TO`          | 수신 이메일 주소 (여러 개는 쉼표로 구분) |
+
+`EMAIL_TO`를 설정하면 텔레그램 메시지와 함께 결과 메일이 전송됩니다. Gmail은 일반 계정 비밀번호 대신 앱 비밀번호를 사용해야 합니다. 메일을 사용하지 않으면 메일 관련 secret은 설정하지 않아도 됩니다.
 
 ---
 
@@ -80,6 +88,13 @@ pip install -r requirements.txt
 export DART_API_KEY="your_key"
 export TELEGRAM_BOT_TOKEN="your_token"
 export TELEGRAM_CHAT_ID="your_chat_id"
+
+export SMTP_HOST="smtp.gmail.com"
+export SMTP_PORT="587"
+export SMTP_USER="your_email@gmail.com"
+export SMTP_PASSWORD="your_app_password"
+export EMAIL_FROM="your_email@gmail.com"
+export EMAIL_TO="recipient@example.com"
 
 python dart_monitor.py
 ```

@@ -12,8 +12,9 @@ DART 재무제표 모니터링 스크립트
 - 연결재무제표(CFS) 우선 → 없으면 별도재무제표(OFS)
 """
 
-import os, sys, time, logging, requests
+import os, sys, time, logging, smtplib, requests
 from datetime import datetime, timedelta
+from email.message import EmailMessage
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -29,6 +30,12 @@ log = logging.getLogger(__name__)
 DART_API_KEY     = os.environ["DART_API_KEY"]
 TELEGRAM_TOKEN   = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+SMTP_HOST        = os.getenv("SMTP_HOST") or "smtp.gmail.com"
+SMTP_PORT        = int(os.getenv("SMTP_PORT") or "587")
+SMTP_USER        = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD    = os.getenv("SMTP_PASSWORD", "")
+EMAIL_FROM       = os.getenv("EMAIL_FROM", SMTP_USER)
+EMAIL_TO         = os.getenv("EMAIL_TO", "")
 
 
 BASE_URL = "https://opendart.fss.or.kr/api"
@@ -435,6 +442,34 @@ def send_file(filepath: str, caption: str):
     log.info("텔레그램 파일 전송 완료")
 
 
+def send_email(subject: str, text: str, attachment_path: str | None = None):
+    if not EMAIL_TO:
+        return
+    if not SMTP_USER or not SMTP_PASSWORD or not EMAIL_FROM:
+        raise ValueError("메일 전송 설정이 부족합니다: SMTP_USER, SMTP_PASSWORD, EMAIL_FROM 필요")
+
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = EMAIL_FROM
+    message["To"] = [address.strip() for address in EMAIL_TO.split(",") if address.strip()]
+    message.set_content(text)
+
+    if attachment_path:
+        with open(attachment_path, "rb") as f:
+            message.add_attachment(
+                f.read(),
+                maintype="application",
+                subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename=os.path.basename(attachment_path),
+            )
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
+        smtp.starttls()
+        smtp.login(SMTP_USER, SMTP_PASSWORD)
+        smtp.send_message(message)
+    log.info("메일 전송 완료: %s", EMAIL_TO)
+
+
 def build_message(df: pd.DataFrame, base_date: str, total_count: int) -> str:
     date_fmt = (f"{base_date[:4]}-{base_date[4:6]}-{base_date[6:]}"
                 if len(base_date) == 8 else base_date)
@@ -471,16 +506,24 @@ def main():
         df, base_date, total_count = collect_data()
 
         if df.empty:
-            send_message(
+            message = (
                 f"📊 <b>DART 모니터링 결과</b>\n"
                 f"📅 {datetime.today().strftime('%Y-%m-%d')}\n\n"
                 f"공시된 보고서 중 조건을 충족하는 기업이 없습니다."
             )
+            send_message(message)
+            send_email("DART 모니터링 결과", message)
             return
 
         save_excel(df, excel_path, base_date)
-        send_message(build_message(df, base_date, total_count))
+        message = build_message(df, base_date, total_count)
+        send_message(message)
         send_file(excel_path, caption=f"DART 재무성장 기업 목록 ({base_date})")
+        send_email(
+            f"DART 재무성장 기업 목록 ({base_date})",
+            message,
+            attachment_path=excel_path,
+        )
 
     except Exception as e:
         log.error("오류 발생: %s", e, exc_info=True)
