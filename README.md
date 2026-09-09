@@ -1,6 +1,6 @@
 # DART 재무성장 기업 모니터링
 
-매일 자동으로 DART(전자공시시스템)에서 **매출액·영업이익·당기순이익이 모두 전기 대비 증가한 기업**을 추출해 엑셀 파일로 저장하고 텔레그램으로 발송합니다.
+매일 자동으로 DART(전자공시시스템)에서 **매출액·영업이익·당기순이익이 모두 전기 대비 증가한 기업**을 추출해 엑셀 파일로 저장하고 텔레그램과 이메일로 발송합니다. 날짜별 결과는 GitHub Pages에서 최신순으로 확인할 수 있습니다.
 
 ---
 
@@ -12,6 +12,9 @@ dart-financial-monitor/
 │   └── workflows/
 │       └── daily_report.yml   # GitHub Actions 스케줄러
 ├── dart_monitor.py            # 메인 파이썬 스크립트
+├── report_archive.py          # 날짜별 저장 및 정적 웹페이지 생성
+├── test_reporting.py          # 외부 전송 없이 실행하는 검증
+├── reports/                   # 운영 실행 후 누적되는 결과와 엑셀
 ├── requirements.txt           # 의존성 패키지
 └── README.md
 ```
@@ -70,6 +73,28 @@ git push -u origin main
 | `EMAIL_TO`          | 수신 이메일 주소 (여러 개는 쉼표로 구분) |
 
 `EMAIL_TO`를 설정하면 텔레그램 메시지와 함께 결과 메일이 전송됩니다. Gmail은 일반 계정 비밀번호 대신 앱 비밀번호를 사용해야 합니다. 메일을 사용하지 않으면 메일 관련 secret은 설정하지 않아도 됩니다.
+
+메일은 텔레그램과 동일한 요약을 HTML/일반 텍스트로 보내고, 결과가 있으면 동일한 엑셀을 첨부합니다. `EMAIL_FROM`은 비워 두면 `SMTP_USER`를 사용합니다. `SMTP_PORT`는 STARTTLS `587`(기본값) 또는 SSL `465`를 지원합니다. 텔레그램이나 이메일 중 하나가 실패해도 다른 전송과 기록 저장을 시도하며, 실패는 Actions에 표시됩니다.
+
+### 5. 날짜별 웹페이지 (GitHub Pages)
+
+1. 변경된 코드를 저장소의 기본 브랜치에 업로드합니다.
+2. 저장소 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 설정합니다.
+3. **Settings → Actions → General → Workflow permissions**에서 저장소 쓰기가 허용되어 있는지 확인합니다. 조직 정책이나 브랜치 보호 규칙이 자동 기록 커밋을 차단하면 예외 설정이 필요합니다.
+4. **Actions → DART 재무 모니터링 → Run workflow**로 한 번 실행합니다.
+5. 배포가 끝나면 Pages 설정에 표시된 주소에서 결과를 확인합니다. 현재 저장소의 기본 주소는 `https://jaehochoidev-star.github.io/dart-financial-monitor/`입니다.
+
+GitHub Pages의 Actions 배포 방식은 [GitHub 공식 안내](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)를 따릅니다. 웹페이지에 알림 요약과 결과 엑셀이 게시됩니다. GitHub Pages의 공개 범위를 확인해 사용하세요.
+
+- 한국시간 **실행 날짜**가 최신인 순서로 모든 결과를 표시합니다. 검색이나 JavaScript는 사용하지 않습니다.
+- 공시 기준일은 실행일과 별도로 표시합니다. 기존의 최근 7일 공시 탐색 방식을 유지하므로 휴일에는 같은 공시 결과가 다시 기록될 수 있습니다.
+- 조건 충족 기업이 없는 날도 기록합니다. 같은 날 재실행하면 해당 날짜의 결과를 갱신합니다.
+- 원본 기록과 엑셀은 `reports/YYYY-MM-DD/`에 커밋하여 계속 보관합니다. 아티팩트 90일 보관 기간과 무관합니다.
+- 텔레그램/메일 전송이 실패하더라도 생성된 기록은 저장하고 웹페이지 배포를 시도합니다. 수집 자체가 실패하면 새 정상 결과로 기록하지 않습니다.
+- 변경 이전의 텔레그램 메시지는 자동으로 가져오지 않습니다. 누적 기록은 적용 이후부터 시작합니다.
+- 자동/수동 실행은 모두 기본 브랜치의 코드를 사용합니다. 웹페이지 생성 결과인 `site/`는 커밋하지 않습니다.
+
+로컬에서 `python report_archive.py`를 실행한 뒤 `site/index.html`을 열면 저장된 기록을 볼 수 있습니다. 기록이 없으면 안내 화면이 표시됩니다.
 
 ---
 

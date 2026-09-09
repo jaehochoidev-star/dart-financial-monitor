@@ -6,14 +6,29 @@ on:
     - cron: "0 23 * * *"
   workflow_dispatch:   # 수동 실행 버튼
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: dart-daily-report
+  cancel-in-progress: false
+
 jobs:
   dart-monitor:
     runs-on: ubuntu-latest
     timeout-minutes: 120   # DART API는 느릴 수 있음
+    env:
+      TZ: Asia/Seoul
+    outputs:
+      pages_uploaded: ${{ steps.pages.outcome }}
 
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Python 설치 (3.11)
         uses: actions/setup-python@v5
@@ -44,3 +59,41 @@ jobs:
           name: dart-report-${{ github.run_id }}
           path: dart_report_*.xlsx
           retention-days: 90
+
+      - name: 날짜별 기록을 저장소에 보관
+        id: archive
+        if: ${{ !cancelled() && hashFiles('reports/**/report.json') != '' }}
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/
+          if ! git diff --cached --quiet; then
+            git commit -m "Save daily DART report [skip ci]"
+            git push origin "HEAD:$DEFAULT_BRANCH"
+          fi
+
+      - name: 정적 웹페이지 생성
+        id: site
+        if: ${{ !cancelled() && steps.archive.outcome == 'success' }}
+        run: python report_archive.py
+
+      - name: Pages 아티팩트 업로드
+        id: pages
+        if: ${{ !cancelled() && steps.site.outcome == 'success' }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: dart-monitor
+    if: ${{ !cancelled() && needs.dart-monitor.outputs.pages_uploaded == 'success' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 웹페이지 배포
+        id: deployment
+        uses: actions/deploy-pages@v4

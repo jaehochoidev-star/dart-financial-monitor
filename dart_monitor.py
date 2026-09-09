@@ -13,6 +13,9 @@ DART 재무제표 모니터링 스크립트
 """
 
 import os, sys, time, logging, smtplib, requests
+import ssl
+from html import escape
+from report_archive import KST, archive_report, plain_message
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 import pandas as pd
@@ -34,7 +37,7 @@ SMTP_HOST        = os.getenv("SMTP_HOST") or "smtp.gmail.com"
 SMTP_PORT        = int(os.getenv("SMTP_PORT") or "587")
 SMTP_USER        = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD    = os.getenv("SMTP_PASSWORD", "")
-EMAIL_FROM       = os.getenv("EMAIL_FROM", SMTP_USER)
+EMAIL_FROM       = os.getenv("EMAIL_FROM") or SMTP_USER
 EMAIL_TO         = os.getenv("EMAIL_TO", "")
 
 
@@ -91,7 +94,7 @@ def get_recent_disclosures() -> tuple[list[dict], str]:
     가장 최근 영업일(최대 7일 이전)에 공시된 보고서 목록 반환
     주말·공휴일 자동 대응
     """
-    today = datetime.today()
+    today = datetime.now(KST)
     for days_back in range(1, 8):
         target_date = today - timedelta(days=days_back)
         date_str = target_date.strftime("%Y%m%d")
@@ -452,7 +455,10 @@ def send_email(subject: str, text: str, attachment_path: str | None = None):
     message["Subject"] = subject
     message["From"] = EMAIL_FROM
     message["To"] = [address.strip() for address in EMAIL_TO.split(",") if address.strip()]
-    message.set_content(text)
+    message.set_content(plain_message(text))
+    message.add_alternative(
+        '<html lang="ko"><body><div style="white-space:pre-wrap;font-family:sans-serif">'
+        + text + '</div></body></html>', subtype="html")
 
     if attachment_path:
         with open(attachment_path, "rb") as f:
@@ -463,8 +469,12 @@ def send_email(subject: str, text: str, attachment_path: str | None = None):
                 filename=os.path.basename(attachment_path),
             )
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
-        smtp.starttls()
+    context = ssl.create_default_context()
+    connection = (smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30, context=context)
+                  if SMTP_PORT == 465 else smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30))
+    with connection as smtp:
+        if SMTP_PORT != 465:
+            smtp.starttls(context=context)
         smtp.login(SMTP_USER, SMTP_PASSWORD)
         smtp.send_message(message)
     log.info("메일 전송 완료: %s", EMAIL_TO)
@@ -483,11 +493,11 @@ def build_message(df: pd.DataFrame, base_date: str, total_count: int) -> str:
     ]
     for rtype, grp in df.groupby("보고서유형"):
         cfs = (grp["재무제표구분"] == "연결").sum()
-        lines.append(f"📁 <b>{rtype}</b> ({len(grp)}개 | 연결 {cfs}개)")
+        lines.append(f"📁 <b>{escape(str(rtype))}</b> ({len(grp)}개 | 연결 {cfs}개)")
         for _, r in grp.nlargest(5, "매출액_증감률").iterrows():
             fs_tag = "연결" if r["재무제표구분"] == "연결" else "별도"
             lines.append(
-                f"  • {r['기업명']} ({r['종목코드']}) [{fs_tag}]  "
+                f"  • {escape(str(r['기업명']))} ({escape(str(r['종목코드']))}) [{fs_tag}]  "
                 f"매출 <b>+{r['매출액_증감률']:.1f}%</b> / "
                 f"영업이익 <b>+{r['영업이익_증감률']:.1f}%</b>"
             )
@@ -499,7 +509,8 @@ def build_message(df: pd.DataFrame, base_date: str, total_count: int) -> str:
 # ── 엔트리포인트 ───────────────────────────────────────────────────────────────
 
 def main():
-    today_str  = datetime.today().strftime("%Y%m%d")
+    run_day = datetime.now(KST)
+    today_str  = run_day.strftime("%Y%m%d")
     excel_path = f"dart_report_{today_str}.xlsx"
 
     try:
@@ -508,27 +519,41 @@ def main():
         if df.empty:
             message = (
                 f"📊 <b>DART 모니터링 결과</b>\n"
-                f"📅 {datetime.today().strftime('%Y-%m-%d')}\n\n"
+                f"📅 {run_day.strftime('%Y-%m-%d')}\n\n"
                 f"공시된 보고서 중 조건을 충족하는 기업이 없습니다."
             )
-            send_message(message)
-            send_email("DART 모니터링 결과", message)
-            return
+            attachment = None
+        else:
+            save_excel(df, excel_path, base_date)
+            message = build_message(df, base_date, total_count)
+            attachment = excel_path
 
-        save_excel(df, excel_path, base_date)
-        message = build_message(df, base_date, total_count)
-        send_message(message)
-        send_file(excel_path, caption=f"DART 재무성장 기업 목록 ({base_date})")
-        send_email(
-            f"DART 재무성장 기업 목록 ({base_date})",
-            message,
-            attachment_path=excel_path,
-        )
+        # Each destination is attempted even when another destination fails.
+        operations = [
+            ("기록 저장", lambda: archive_report(
+                message, base_date, total_count, len(df), attachment,
+                run_date=run_day.strftime("%Y-%m-%d"))),
+            ("텔레그램 메시지", lambda: send_message(message)),
+        ]
+        if attachment:
+            operations.append(("텔레그램 첨부", lambda: send_file(
+                attachment, caption=f"DART 재무성장 기업 목록 ({base_date})")))
+        operations.append(("이메일", lambda: send_email(
+            f"DART 모니터링 결과 ({today_str})", message, attachment)))
+        failures = []
+        for label, operation in operations:
+            try:
+                operation()
+            except Exception:
+                log.exception("%s 실패", label)
+                failures.append(label)
+        if failures:
+            raise RuntimeError("실패한 작업: " + ", ".join(failures))
 
     except Exception as e:
         log.error("오류 발생: %s", e, exc_info=True)
         try:
-            send_message(f"⚠️ DART 모니터링 오류\n<code>{e}</code>")
+            send_message(f"⚠️ DART 모니터링 오류\n<code>{escape(str(e))}</code>")
         except Exception:
             pass
         sys.exit(1)
