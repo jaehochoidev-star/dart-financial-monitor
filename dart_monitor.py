@@ -41,6 +41,24 @@ EMAIL_FROM       = os.getenv("EMAIL_FROM") or SMTP_USER
 EMAIL_TO         = os.getenv("EMAIL_TO", "")
 
 
+class PrivateLogFormatter(logging.Formatter):
+    """Redact configured credentials and addresses, including exception URLs."""
+
+    def format(self, record):
+        rendered = super().format(record)
+        private_values = [DART_API_KEY, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID,
+                          SMTP_USER, SMTP_PASSWORD, EMAIL_FROM]
+        private_values.extend(address.strip() for address in EMAIL_TO.split(","))
+        for value in sorted(set(private_values), key=len, reverse=True):
+            if value:
+                rendered = rendered.replace(value, "[REDACTED]")
+        return rendered
+
+
+for handler in logging.getLogger().handlers:
+    handler.setFormatter(PrivateLogFormatter("%(asctime)s [%(levelname)s] %(message)s"))
+
+
 BASE_URL = "https://opendart.fss.or.kr/api"
 
 # 공시 상세 유형코드 → (reprt_code, 보고서명, 연간여부)
@@ -477,7 +495,7 @@ def send_email(subject: str, text: str, attachment_path: str | None = None):
             smtp.starttls(context=context)
         smtp.login(SMTP_USER, SMTP_PASSWORD)
         smtp.send_message(message)
-    log.info("메일 전송 완료: %s", EMAIL_TO)
+    log.info("메일 전송 완료")
 
 
 def build_message(df: pd.DataFrame, base_date: str, total_count: int) -> str:

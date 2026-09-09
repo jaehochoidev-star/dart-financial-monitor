@@ -1,7 +1,6 @@
-pip install requests pandas openpyxl
+"""Run with the environment variables described in README.md."""
 
-export DART_API_KEY="여기에_DART_API키_입력"
-export TELEGRAM_BOT_TOKEN="[REMOVED]"
-export TELEGRAM_CHAT_ID="[REMOVED]"
+if __name__ == "__main__":
+    from dart_monitor import main
 
-python dart_monitor.py
+    main()

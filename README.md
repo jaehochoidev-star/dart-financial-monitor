@@ -100,6 +100,15 @@ GitHub Pages의 Actions 배포 방식은 [GitHub 공식 안내](https://docs.git
 
 ## 🚀 실행 방법
 
+### 자격증명 관리
+
+- API 키, 봇 토큰, 채팅 ID, 메일 계정과 비밀번호는 GitHub Actions Secrets 또는 로컬 환경변수로만 설정합니다.
+- `__bot_test.py`는 `TELEGRAM_BOT_TOKEN`과 `TELEGRAM_CHAT_ID` 환경변수를 사용합니다. 직접 실행할 때만 테스트 메시지를 보냅니다.
+- `__run_darrt_monitor.py`는 설정된 환경변수로 모니터링을 실행하는 보조 진입점입니다.
+- `.env` 파일은 커밋에서 제외되지만 자동으로 읽지는 않습니다. 실행 전에 환경변수를 설정해야 합니다.
+- 토큰을 재발급하면 **Settings → Secrets and variables → Actions → TELEGRAM_BOT_TOKEN** 값을 교체합니다. 채팅 ID는 기존 Secret 값을 그대로 사용합니다.
+- 로그에는 메일 수신 주소를 출력하지 않고, 오류 로그의 설정된 자격증명은 가립니다. 과거 실행 로그는 소스 수정으로 변경되지 않습니다.
+
 ### 자동 실행 (매일 오전 8시 KST)
 설정 후 아무것도 하지 않아도 됩니다. GitHub Actions가 자동으로 실행합니다.
 

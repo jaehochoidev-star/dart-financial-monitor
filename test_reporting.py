@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import tempfile
 import unittest
@@ -15,6 +16,21 @@ from report_archive import archive_report, build_site
 
 
 class ReportingTests(unittest.TestCase):
+    def test_logs_redact_credentials_and_recipient_in_traceback(self):
+        with patch.multiple(monitor, DART_API_KEY="sample-api-key",
+                            TELEGRAM_TOKEN="sample-bot-token", TELEGRAM_CHAT_ID="123456789",
+                            SMTP_PASSWORD="sample-password", EMAIL_TO="private@example.com"):
+            try:
+                raise RuntimeError("sample-api-key sample-bot-token 123456789 sample-password private@example.com")
+            except RuntimeError:
+                import sys
+                record = logging.LogRecord("test", logging.ERROR, "test", 1,
+                                           "Failed for %s", ("private@example.com",), sys.exc_info())
+            output = monitor.PrivateLogFormatter().format(record)
+            for value in ("sample-api-key", "sample-bot-token", "123456789", "sample-password", "private@example.com"):
+                self.assertNotIn(value, output)
+            self.assertIn("[REDACTED]", output)
+
     def test_history_order_escape_attachment_and_rerun(self):
         with tempfile.TemporaryDirectory() as temp:
             root, output = Path(temp) / "reports", Path(temp) / "site"
