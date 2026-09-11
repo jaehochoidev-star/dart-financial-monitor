@@ -16,6 +16,55 @@ from report_archive import archive_report, build_site
 
 
 class ReportingTests(unittest.TestCase):
+    def test_month_pages_isolate_records_and_preserve_downloads(self):
+        from html.parser import HTMLParser
+
+        class Links(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.hrefs = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "a":
+                    self.hrefs.append(dict(attrs)["href"])
+
+        with tempfile.TemporaryDirectory() as temp:
+            root, output = Path(temp) / "reports", Path(temp) / "site"
+            workbook = Path(temp) / "sample.xlsx"
+            workbook.write_bytes(b"sample workbook")
+            for day in ("2025-12-31", "2026-01-01", "2026-01-15"):
+                archive_report("result-" + day, day.replace("-", ""), 1, 1,
+                               workbook, root=root, run_date=day)
+            build_site(root, output)
+            january = (output / "2026-01.html").read_text(encoding="utf-8")
+            december = (output / "2025-12.html").read_text(encoding="utf-8")
+            self.assertEqual((output / "index.html").read_text(encoding="utf-8"), january)
+            self.assertIn("result-2025-12-31", december)
+            self.assertNotIn("result-2025-12-31", january)
+            self.assertNotIn("result-2026-01-01", december)
+            self.assertLess(january.index("result-2026-01-15"), january.index("result-2026-01-01"))
+            self.assertIn('href="2025-12.html" aria-current="page"', december)
+            self.assertIn('href="2026-01.html" aria-current="page"', january)
+            for page in output.glob("*.html"):
+                links = Links()
+                links.feed(page.read_text(encoding="utf-8"))
+                for href in links.hrefs:
+                    self.assertTrue((output / href).is_file(), href)
+            archive_report("new-month", "20260201", 0, 0, root=root, run_date="2026-02-01")
+            build_site(root, output)
+            newest = (output / "index.html").read_text(encoding="utf-8")
+            self.assertIn("new-month", newest)
+            self.assertNotIn("result-2026-01-01", newest)
+            self.assertIn('href="2026-02.html"', (output / "2025-12.html").read_text(encoding="utf-8"))
+
+    def test_empty_archive_renders_without_month_tabs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "site"
+            build_site(Path(temp) / "reports", output)
+            html = (output / "index.html").read_text(encoding="utf-8")
+            self.assertIn("아직 저장된 결과가 없습니다", html)
+            self.assertNotIn('<nav', html)
+
     def test_logs_redact_credentials_and_recipient_in_traceback(self):
         with patch.multiple(monitor, DART_API_KEY="sample-api-key",
                             TELEGRAM_TOKEN="sample-bot-token", TELEGRAM_CHAT_ID="123456789",
