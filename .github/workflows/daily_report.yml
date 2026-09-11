@@ -23,6 +23,7 @@ jobs:
       TZ: Asia/Seoul
     outputs:
       pages_uploaded: ${{ steps.pages.outcome }}
+      pages_artifact_name: ${{ steps.pages_artifact.outputs.name }}
 
     steps:
       - name: 코드 체크아웃
@@ -56,7 +57,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dart-report-${{ github.run_id }}
+          name: dart-report-${{ github.run_id }}-${{ github.run_attempt }}
           path: dart_report_*.xlsx
           retention-days: 90
 
@@ -79,11 +80,17 @@ jobs:
         if: ${{ !cancelled() && steps.archive.outcome == 'success' }}
         run: python report_archive.py
 
+      - name: 이번 실행의 Pages 아티팩트 이름 지정
+        id: pages_artifact
+        if: ${{ !cancelled() && steps.site.outcome == 'success' }}
+        run: echo "name=github-pages-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
       - name: Pages 아티팩트 업로드
         id: pages
-        if: ${{ !cancelled() && steps.site.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.pages_artifact.outcome == 'success' }}
         uses: actions/upload-pages-artifact@v3
         with:
+          name: ${{ steps.pages_artifact.outputs.name }}
           path: site
 
   deploy:
@@ -97,3 +104,5 @@ jobs:
       - name: 웹페이지 배포
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: ${{ needs.dart-monitor.outputs.pages_artifact_name }}
