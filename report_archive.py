@@ -5,6 +5,7 @@ import shutil
 from datetime import datetime, timedelta, timezone
 from html import escape, unescape
 from pathlib import Path
+from openpyxl import load_workbook
 
 KST = timezone(timedelta(hours=9))
 
@@ -37,6 +38,45 @@ def archive_report(message, base_date, total_count, matched_count,
     temporary.replace(directory / "report.json")
 
 
+def render_financial_table(filepath, day):
+    """Render the existing report workbook without changing its numeric values."""
+    workbook = load_workbook(filepath, read_only=True, data_only=True)
+    try:
+        sheet = workbook["증가 기업 목록"]
+        rows = sheet.iter_rows(min_row=3, max_col=15, values_only=True)
+        headers = next(rows)
+        headings = ''.join(f'<th scope="col">{escape(str(value or ""))}</th>' for value in headers)
+        body = []
+        for row in rows:
+            if all(value is None for value in row):
+                continue
+            cells = []
+            for index, value in enumerate(row):
+                if value is None:
+                    label = "—"
+                elif index == 0:
+                    label = str(value).zfill(6)
+                elif index in (8, 11, 14) and isinstance(value, (int, float)):
+                    # The workbook stores 42.88 for 42.88%, not 0.4288.
+                    label = f"{value:,.2f}%"
+                elif index >= 6 and isinstance(value, (int, float)):
+                    label = f"{value:,.0f}"
+                else:
+                    label = str(value)
+                alignment = ' class="number"' if index >= 6 else ''
+                cells.append(f'<td{alignment}>{escape(label)}</td>')
+            body.append('<tr>' + ''.join(cells) + '</tr>')
+        if not body:
+            return '<p>상세 내역에 표시할 기업이 없습니다.</p>'
+        return (f'<h3 id="table-{day}">기업별 상세 내역</h3>'
+                '<p class="meta">금액 단위: 원 · 증감률: % · 표를 좌우로 스크롤하면 모든 항목을 볼 수 있습니다.</p>'
+                f'<div class="table-scroll" role="region" aria-labelledby="table-{day}" tabindex="0">'
+                f'<table><caption>{day} 기업별 재무 비교</caption><thead><tr>{headings}</tr></thead>'
+                '<tbody>' + ''.join(body) + '</tbody></table></div>')
+    finally:
+        workbook.close()
+
+
 def build_site(root="reports", output="site"):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -47,18 +87,23 @@ def build_site(root="reports", output="site"):
         datetime.strptime(day, "%Y-%m-%d")
         month = day[:7]
         link = ""
+        detail_table = ""
         if record["attachment"]:
             target = output / "downloads" / day
             target.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source.parent / "report.xlsx", target / "report.xlsx")
             link = f'<a href="downloads/{day}/report.xlsx" download>상세 엑셀 다운로드 ↗</a>'
+            detail_table = render_financial_table(source.parent / "report.xlsx", day)
         base = record["base_date"]
         base = f"{base[:4]}-{base[4:6]}-{base[6:]}" if len(base) == 8 else "해당 공시 없음"
+        summary = record['message'].replace(
+            "📎 상세 내역은 첨부 엑셀 파일을 확인하세요.",
+            "📋 상세 내역은 아래 표에서 확인하세요.")
         cards_by_month.setdefault(month, []).append(f'''<article>
 <div class="heading"><h2><time datetime="{day}">{day}</time></h2>
 <span class="badge">조건 충족 {int(record['matched_count'])}개</span></div>
 <p class="meta">공시 기준일 {escape(base)} · 조회 기업 {int(record['total_count'])}개</p>
-<pre>{escape(record['message'])}</pre>{link}</article>''')
+<pre>{escape(summary)}</pre>{detail_table}{link}</article>''')
     template = '''<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -66,7 +111,7 @@ def build_site(root="reports", output="site"):
 <title>DART | __MONTH_TITLE__</title>
 <style>
 :root{color-scheme:light;font-family:system-ui,-apple-system,"Malgun Gothic",sans-serif;color:#172b3a;background:#f3f5f7}
-*{box-sizing:border-box}body{margin:0;border-top:5px solid #166b60}main{max-width:920px;margin:auto;padding:48px 24px}
+*{box-sizing:border-box}body{margin:0;border-top:5px solid #166b60}main{max-width:1400px;margin:auto;padding:48px 24px}
 header{margin-bottom:32px}.eyebrow{color:#166b60;font-size:13px;font-weight:750;letter-spacing:.12em}
 h1{font-size:32px;letter-spacing:-.06em;margin:12px 0}header p,.meta,footer{color:#63717d;line-height:1.7}
 article{background:white;border:1px solid #dce3e7;border-radius:14px;padding:28px;margin:0 0 20px}
@@ -78,6 +123,10 @@ a{display:inline-block;color:#126458;font-weight:650;text-underline-offset:4px;m
 .months a{flex-shrink:0;margin:0;padding:10px 16px;border:1px solid #cbd8d5;border-radius:8px;text-decoration:none;background:white}
 .months a[aria-current="page"]{background:#166b60;color:white;border-color:#166b60}
 .month-title{font-size:19px;margin:0 0 20px}.month-title span{font-size:13px;font-weight:400;color:#63717d;margin-left:10px}
+h3{font-size:17px;margin:24px 0 8px}.table-scroll{max-width:100%;overflow-x:auto;border:1px solid #dce3e7;border-radius:8px}
+.table-scroll:focus-visible{outline:3px solid #166b60;outline-offset:3px}table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+caption{text-align:left;padding:12px;font-weight:650}th,td{padding:12px;white-space:nowrap;text-align:left;border-bottom:1px solid #e3e9ec}
+th{background:#eaf2ef;color:#285648}td.number{text-align:right}tbody tr:nth-child(even){background:#f7f9fa}tbody tr:last-child td{border-bottom:0}
 footer{font-size:12px;margin-top:28px}@media(max-width:520px){main{padding:30px 16px}article{padding:20px}h1{font-size:27px}pre{font-size:13px}}
 </style></head><body><main><header><div class="eyebrow">DART / DAILY REPORT</div>
 <h1>재무성장 기업 모니터링</h1><p>월을 선택하면 해당 월의 결과를 최신 날짜부터 볼 수 있습니다.<br>매출액 · 영업이익 · 당기순이익이 모두 증가한 기업을 기록합니다.</p>

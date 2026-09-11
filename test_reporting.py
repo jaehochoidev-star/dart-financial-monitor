@@ -12,10 +12,43 @@ os.environ.setdefault("TELEGRAM_CHAT_ID", "test")
 
 import pandas as pd
 import dart_monitor as monitor
-from report_archive import archive_report, build_site
+from report_archive import archive_report, build_site, render_financial_table
+from openpyxl import Workbook
+
+
+def make_workbook(path):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "증가 기업 목록"
+    sheet.append(["제목"])
+    sheet.append(["설명"])
+    sheet.append(["종목코드", "기업명", "보고서유형", "기준연도", "재무제표", "비교기준",
+                  "매출액(당기)", "매출액(전년동기)", "매출액증감률(%)",
+                  "영업이익(당기)", "영업이익(전년동기)", "영업이익증감률(%)",
+                  "당기순이익(당기)", "당기순이익(전년동기)", "당기순이익증감률(%)"])
+    sheet.append(["005930", "기업 <테스트>", "사업보고서", "2026", "연결", "전기(연간)",
+                  23594361108, 16512932058, 42.88, 22523390467, 14317961314, 57.31,
+                  19646303318, 11953832363, 64.35])
+    sheet.append(["350520", "두 번째 기업", "사업보고서", "2026", "연결", "전기(연간)",
+                  0, -100, None, -50, -100, 50, 0, 0, None])
+    workbook.save(path)
+    workbook.close()
 
 
 class ReportingTests(unittest.TestCase):
+    def test_financial_table_exact_amounts_percent_codes_and_escape(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "report.xlsx"
+            make_workbook(path)
+            html = render_financial_table(path, "2026-09-10")
+            for value in ("005930", "23,594,361,108", "42.88%", "64.35%", "두 번째 기업", "—", "-100"):
+                self.assertIn(value, html)
+            self.assertIn("기업 &lt;테스트&gt;", html)
+            self.assertNotIn("기업 <테스트>", html)
+            self.assertEqual(html.count('<th scope="col">'), 15)
+            self.assertEqual(html.count('<td'), 30)
+            self.assertIn('tabindex="0"', html)
+
     def test_month_pages_isolate_records_and_preserve_downloads(self):
         from html.parser import HTMLParser
 
@@ -31,7 +64,7 @@ class ReportingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root, output = Path(temp) / "reports", Path(temp) / "site"
             workbook = Path(temp) / "sample.xlsx"
-            workbook.write_bytes(b"sample workbook")
+            make_workbook(workbook)
             for day in ("2025-12-31", "2026-01-01", "2026-01-15"):
                 archive_report("result-" + day, day.replace("-", ""), 1, 1,
                                workbook, root=root, run_date=day)
@@ -84,7 +117,7 @@ class ReportingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root, output = Path(temp) / "reports", Path(temp) / "site"
             attachment = Path(temp) / "test.xlsx"
-            attachment.write_bytes(b"test workbook")
+            make_workbook(attachment)
             archive_report("<b>older</b>", "20260908", 4, 0,
                            root=root, run_date="2026-09-09")
             archive_report("<b>newer</b> &lt;script&gt;", "20260909", 5, 1,
@@ -94,6 +127,8 @@ class ReportingTests(unittest.TestCase):
             self.assertLess(html.index('datetime="2026-09-10"'), html.index('datetime="2026-09-09"'))
             self.assertIn("&lt;script&gt;", html)
             self.assertNotIn("<script>", html)
+            self.assertIn("23,594,361,108", html)
+            self.assertIn("기업별 상세 내역", html)
             self.assertEqual((output / "downloads/2026-09-10/report.xlsx").read_bytes(), attachment.read_bytes())
             archive_report("없음", "20260909", 5, 0, root=root, run_date="2026-09-10")
             self.assertEqual(len(list(root.glob("*/report.json"))), 2)

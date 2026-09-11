@@ -355,7 +355,7 @@ def save_excel(df: pd.DataFrame, filepath: str, base_date: str):
     ws.merge_cells("A2:O2")
     c = ws["A2"]
     c.value = ("매출액 · 영업이익 · 당기순이익 전년 동기(누적) 대비 모두 증가한 기업  "
-               "| 연결재무제표 우선 적용  (단위: 백만원)")
+               "| 연결재무제표 우선 적용  (단위: 원)")
     c.font  = Font(color="FFFFFF", name="Arial", size=10)
     c.fill  = S; c.alignment = CC
     ws.row_dimensions[2].height = 20
